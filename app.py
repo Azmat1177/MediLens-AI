@@ -5,6 +5,14 @@ import tempfile
 
 import streamlit as st
 
+# Streamlit Cloud: copy the secret into an env var BEFORE importing the agents
+try:
+    for _k in ("GEMINI_API_KEY", "MEDILENS_MODEL"):
+        if _k in st.secrets and not os.getenv(_k):
+            os.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass  # no secrets file locally is fine
+
 from medilens_agents import DRUG_KB, build_graph
 
 st.set_page_config(page_title="MediLens AI", page_icon="🩺", layout="centered")
@@ -52,7 +60,11 @@ with st.sidebar:
     language = "en" if lang_label == "English" else "roman_urdu"
     sex = st.selectbox("Patient sex (for reference ranges)", ["F", "M"])
     age = st.number_input("Age", 1, 120, 30)
-    st.info("Set GEMINI_API_KEY to read photos/PDFs. Without it, paste report text or type the medicine name.")
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        st.success("Gemini key detected. Photo/PDF reading is on.")
+    else:
+        st.info("No Gemini key found. Paste report text or type the medicine name, "
+                "or add GEMINI_API_KEY in Secrets.")
 
 app = get_graph()
 tab_report, tab_med, tab_ask = st.tabs(["📄 Medical report", "💊 Medicine", "💬 Question"])
