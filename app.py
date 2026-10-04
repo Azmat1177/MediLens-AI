@@ -102,7 +102,7 @@ with tab_med:
                 show_result(app.invoke(state))
 
 with tab_ask:
-    q = st.text_input("Ask a question (safety check demo)", placeholder="Can you change my dose?")
+    q = st.text_input("Ask a medical term or test question", placeholder="What does MCV mean?")
     if st.button("Send") and q:
-        out = app.invoke({"language": language, "user_text": q, "raw_text": ""})
+        out = app.invoke({"language": language, "user_text": q})
         show_result(out)
