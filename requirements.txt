@@ -1,0 +1,6 @@
+langgraph
+pydantic
+streamlit
+google-genai   # Gemini (free key from aistudio.google.com)
+pytesseract    # optional OCR fallback
+pillow         # optional
