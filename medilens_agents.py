@@ -244,9 +244,45 @@ def guard_out(state: State) -> dict:
 def orchestrator(state: State) -> dict:
     is_med = bool(state.get("medicine_hint")) or (
         state.get("file_path", "").lower().endswith((".jpg", ".jpeg", ".png")) and not state.get("raw_text"))
-    rtype = "medicine" if is_med else "report"
+    has_report = bool(state.get("raw_text") or state.get("file_path"))
+    if is_med:
+        rtype = "medicine"
+    elif has_report:
+        rtype = "report"
+    elif state.get("user_text"):
+        rtype = "general"
+    else:
+        rtype = "report"
     return {"request_type": rtype, "retry_count": state.get("retry_count", 0),
             "trace": _trace(state, f"orchestrator: {rtype}")}
+
+
+# --------------------------------------------------------------------------
+# General question agent (terms, tests, "what does X mean")
+# --------------------------------------------------------------------------
+def general_agent(state: State) -> dict:
+    lang = state.get("language", "en")
+    client, types = _gemini()
+    if not client:
+        msg = ("I can explain general medical terms when a Gemini key is set. "
+               "Meanwhile, upload a report or a medicine photo, or paste report text, and I will analyze it.")
+        return {"final_answer": msg, "trace": _trace(state, "general: no LLM key")}
+    try:
+        resp = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=state["user_text"],
+            config=types.GenerateContentConfig(
+                system_instruction=("You explain medical terms and lab tests in simple, short language. "
+                                    "Never diagnose, never give doses, never tell the user to start, stop or "
+                                    "change a medicine. For symptoms or decisions, advise seeing a doctor. "
+                                    f"Answer in: {lang}."),
+                temperature=0.3,
+            ),
+        )
+        return {"final_answer": resp.text or "", "trace": _trace(state, "general: answered")}
+    except Exception:
+        return {"final_answer": "Sorry, I could not answer right now. Please try again.",
+                "trace": _trace(state, "general: error")}
 
 
 # --------------------------------------------------------------------------
@@ -444,7 +480,7 @@ def route_after_guard_in(s: State) -> str:
 
 
 def route_after_orch(s: State) -> str:
-    return "medicine_agent" if s["request_type"] == "medicine" else "extraction_agent"
+    return {"medicine": "medicine_agent", "general": "general_agent"}.get(s["request_type"], "extraction_agent")
 
 
 def route_ask_user(next_node: str):
@@ -465,11 +501,12 @@ def build_graph():
     for name, fn in [("guard_in", guard_in), ("orchestrator", orchestrator), ("extraction_agent", extraction_agent),
                      ("analysis_agent", analysis_agent), ("rag_agent", rag_agent), ("medicine_agent", medicine_agent),
                      ("verification_agent", verification_agent), ("explanation_agent", explanation_agent),
-                     ("escalate_node", escalate_node), ("guard_out", guard_out)]:
+                     ("escalate_node", escalate_node), ("general_agent", general_agent), ("guard_out", guard_out)]:
         g.add_node(name, fn)
     g.set_entry_point("guard_in")
     g.add_conditional_edges("guard_in", route_after_guard_in, ["guard_out", "orchestrator"])
-    g.add_conditional_edges("orchestrator", route_after_orch, ["medicine_agent", "extraction_agent"])
+    g.add_conditional_edges("orchestrator", route_after_orch, ["medicine_agent", "extraction_agent", "general_agent"])
+    g.add_edge("general_agent", "guard_out")
     g.add_conditional_edges("extraction_agent", route_ask_user("analysis_agent"), ["guard_out", "analysis_agent"])
     g.add_edge("analysis_agent", "rag_agent")
     g.add_edge("rag_agent", "verification_agent")
